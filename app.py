@@ -64,24 +64,25 @@ def add_entry(username, entry_type, amount, category, entry_date, note):
 
 def get_user_data(username):
     sheet = get_data_sheet()
-    all_data = sheet.get_all_records()
-    return [d for d in all_data if d["username"] == username]
-
-def delete_entry(username, row_index):
-    sheet = get_data_sheet()
     all_data = sheet.get_all_values()
-    actual_row = None
-    count = 0
-    for i, row in enumerate(all_data[1:], start=2):
-        if row[0] == username:
-            count += 1
-            if count == row_index:
-                actual_row = i
-                break
-    if actual_row:
-        sheet.delete_rows(actual_row)
-        return True
-    return False
+    result = []
+    for i, row in enumerate(all_data):
+        if i == 0:
+            continue
+        if len(row) >= 5 and row[0] == username:
+            result.append({
+                "row_num": i + 1,
+                "তারিখ": row[1],
+                "ধরন": row[2],
+                "খাত": row[3],
+                "পরিমাণ": row[4],
+                "নোট": row[5] if len(row) > 5 else ""
+            })
+    return result
+
+def delete_entry(row_num):
+    sheet = get_data_sheet()
+    sheet.delete_rows(row_num)
 
 # Session state
 if "logged_in" not in st.session_state:
@@ -89,7 +90,6 @@ if "logged_in" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 
-# Login / Register
 if not st.session_state.logged_in:
     tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
 
@@ -161,36 +161,38 @@ else:
             st.error("পরিমাণ দিন!")
 
     st.subheader("📊 আমার সব এন্ট্রি")
-    if st.button("🔄 ডেটা লোড করুন"):
-        try:
-            data = get_user_data(st.session_state.username)
-            if data:
-                df = pd.DataFrame(data).drop(columns=["username"])
-                total_income = df[df["ধরন"] == "আয় 💚"]["পরিমাণ"].sum()
-                total_expense = df[df["ধরন"] == "খরচ 🔴"]["পরিমাণ"].sum()
-                balance = total_income - total_expense
+    try:
+        data = get_user_data(st.session_state.username)
+        if data:
+            df = pd.DataFrame(data)
+            display_df = df.drop(columns=["row_num"])
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("মোট আয়", f"৳{total_income:.0f}")
-                col2.metric("মোট খরচ", f"৳{total_expense:.0f}")
-                col3.metric("ব্যালেন্স", f"৳{balance:.0f}")
+            total_income = pd.to_numeric(display_df[display_df["ধরন"] == "আয় 💚"]["পরিমাণ"], errors='coerce').sum()
+            total_expense = pd.to_numeric(display_df[display_df["ধরন"] == "খরচ 🔴"]["পরিমাণ"], errors='coerce').sum()
+            balance = total_income - total_expense
 
-                st.dataframe(df, use_container_width=True)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("মোট আয়", f"৳{total_income:.0f}")
+            col2.metric("মোট খরচ", f"৳{total_expense:.0f}")
+            col3.metric("ব্যালেন্স", f"৳{balance:.0f}")
 
-                st.subheader("🗑️ এন্ট্রি Delete করুন")
-                delete_index = st.number_input("কত নম্বর এন্ট্রি delete করবে?", min_value=1, max_value=len(df), step=1)
-                if st.button("Delete 🗑️"):
-                    try:
-                        if delete_entry(st.session_state.username, delete_index):
-                            st.success("✅ Delete হয়েছে! আবার লোড করুন।")
-                        else:
-                            st.error("Delete হয়নি!")
-                    except Exception as e:
-                        st.error(f"সমস্যা: {e}")
+            display_df.insert(0, "নং", range(1, len(display_df) + 1))
+            st.dataframe(display_df, use_container_width=True)
 
-                csv = df.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 CSV ডাউনলোড", csv, "expense.csv", "text/csv")
-            else:
-                st.info("এখনো কোনো এন্ট্রি নেই!")
-        except Exception as e:
-            st.error(f"সমস্যা: {e}")
+            st.subheader("🗑️ এন্ট্রি Delete করুন")
+            delete_index = st.number_input("কত নম্বর এন্ট্রি delete করবে?", min_value=1, max_value=len(df), step=1)
+            if st.button("Delete 🗑️"):
+                try:
+                    row_to_delete = df.iloc[int(delete_index) - 1]["row_num"]
+                    delete_entry(int(row_to_delete))
+                    st.success("✅ Delete হয়েছে!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"সমস্যা: {e}")
+
+            csv = display_df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 CSV ডাউনলোড", csv, "expense.csv", "text/csv")
+        else:
+            st.info("এখনো কোনো এন্ট্রি নেই!")
+    except Exception as e:
+        st.error(f"সমস্যা: {e}")
